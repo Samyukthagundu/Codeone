@@ -1,44 +1,60 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 
-class RequestHandler(BaseHTTPRequestHandler):
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/getTimeStories":
-            # Fetch the Time.com homepage
-            response = requests.get('https://time.com')
-            if response.status_code == 200:
-                stories = self.extract_stories(response.text)
-                # Send response
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(stories.encode('utf-8'))
-            else:
-                self.send_error(500, "Failed to fetch Time.com")
-    
-    def extract_stories(self, html):
-        # Basic text processing to extract the latest 6 stories (Note: In real-world, use libraries like BeautifulSoup)
-        # This assumes the stories have a consistent format such as being inside <h3> or <a> tags, etc.
-        latest_stories = []
-        start_index = html.find('LATEST STORIES')
-        if start_index != -1:
-            stories_part = html[start_index:start_index+5000]  # Extract a portion of the page for processing
-            lines = stories_part.splitlines()
-            for line in lines:
-                if '<a href=' in line:
-                    title_start = line.find('>') + 1
-                    title_end = line.find('</a>')
-                    link_start = line.find('href="') + len('href="')
-                    link_end = line.find('"', link_start)
-                    if title_start != -1 and title_end != -1 and link_start != -1 and link_end != -1:
-                        title = line[title_start:title_end].strip()
-                        link = "https://time.com" + line[link_start:link_end]
-                        latest_stories.append({"title": title, "link": link})
-                if len(latest_stories) >= 6:  # Get only the latest 6 stories
-                    break
-        return json.dumps(latest_stories)
+            # Fetch Time.com homepage
+            try:
+                response = requests.get("https://time.com")
+                if response.status_code == 200:
+                    stories_json = self.extract_stories(response.text)
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(stories_json.encode('utf-8'))
+                else:
+                    self.send_error(500, "Failed to fetch Time.com")
+            except Exception as e:
+                self.send_error(500, f"Error occurred: {str(e)}")
 
-def run(server_class=HTTPServer, handler_class=RequestHandler):
+    def extract_stories(self, html):
+        # Locate "LATEST STORIES" section
+        start_index = html.find('LATEST STORIES')
+        if start_index == -1:
+            return '[]'
+
+        # Limit the scope to the relevant section of the HTML
+        end_index = html.find('</section>', start_index)
+        relevant_html = html[start_index:end_index]
+
+        # Initialize storage for stories
+        stories = []
+        current_pos = 0
+
+        while len(stories) < 6:
+            # Find the next story link
+            link_start = relevant_html.find('<a href="', current_pos)
+            if link_start == -1:
+                break
+            link_start += len('<a href="')
+            link_end = relevant_html.find('"', link_start)
+            title_start = relevant_html.find('>', link_end) + 1
+            title_end = relevant_html.find('</a>', title_start)
+
+            # Extract and store the title and link
+            if link_start != -1 and link_end != -1 and title_start != -1 and title_end != -1:
+                link = "https://time.com" + relevant_html[link_start:link_end]
+                title = relevant_html[title_start:title_end].strip()
+                stories.append({"title": title, "link": link})
+                current_pos = title_end
+            else:
+                break
+
+        # Convert stories list to JSON format
+        return str(stories).replace("'", '"')
+
+def run(server_class=HTTPServer, handler_class=SimpleHTTPRequestHandler):
     server_address = ('', 8080)
     httpd = server_class(server_address, handler_class)
     print('Starting server on port 8080...')
@@ -46,3 +62,4 @@ def run(server_class=HTTPServer, handler_class=RequestHandler):
 
 if __name__ == "__main__":
     run()
+
